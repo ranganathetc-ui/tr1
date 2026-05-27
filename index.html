@@ -24,7 +24,17 @@
   .splash-btn{background:var(--text);border:none;color:#0d0d0d;padding:14px 44px;font-size:13px;font-weight:600;letter-spacing:1px;border-radius:50px;cursor:pointer;font-family:inherit;}
   .splash-sub{font-size:11px;color:var(--text3);margin-top:14px;letter-spacing:1px;}
   /* HEADER */
-  #header{padding:20px 20px 14px;border-bottom:1px solid var(--glass-border);position:fixed;top:0;left:0;right:0;background:rgba(13,13,13,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);z-index:9;}
+  #header{padding:20px 20px 14px;border-bottom:1px solid var(--glass-border);position:fixed;top:0;left:0;right:0;background:rgba(13,13,13,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);z-index:9;transition:transform 0.46s cubic-bezier(0.32,0.72,0,1),opacity 0.32s ease;}
+  #header.collapsed{transform:translateY(-100%);opacity:0;pointer-events:none;}
+  /* Swipe indicator pill — shows briefly when header revealed/hidden */
+  #header-indicator{
+    position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:12;
+    width:36px;height:4px;border-radius:2px;
+    background:rgba(255,255,255,0.25);
+    pointer-events:none;
+    opacity:0;transition:opacity 0.3s ease;
+  }
+  #header-indicator.show{opacity:1;}
   #header-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;}
   .header-user{font-size:11px;color:var(--text3);letter-spacing:1px;text-align:right;}
   #jump-today-btn{display:none;background:none;border:1px solid var(--glass-border);color:var(--text2);padding:4px 12px;font-size:10px;letter-spacing:1px;border-radius:20px;cursor:pointer;font-family:inherit;}
@@ -308,6 +318,7 @@
     <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
     <div id="progress-meta"><span id="done-count">0/0 done</span><span id="score-pct">0%</span></div>
   </div>
+  <div id="header-indicator"></div>
   <div id="nav">
     <button class="nav-btn active" data-view="tasks">Tasks</button>
     <button class="nav-btn" data-view="streak">Streak</button>
@@ -2677,14 +2688,12 @@ function applyHeaderOffset(){
   const nav=document.getElementById("nav");
   const subnav=document.getElementById("sub-nav");
   if(!header||!nav) return;
-  const hh=header.offsetHeight;
+  const hh=headerCollapsed?0:header.offsetHeight;
   const nh=nav.offsetHeight;
-  const sh=subnav.classList.contains("visible")?subnav.offsetHeight:0;
+  const sh=subnav&&subnav.classList.contains("visible")?subnav.offsetHeight:0;
   const total=hh+nh+sh;
-  // Update fixed positions
   nav.style.top=hh+"px";
   if(subnav) subnav.style.top=(hh+nh)+"px";
-  // Push all body views down
   document.querySelectorAll(".body").forEach(el=>{
     el.style.paddingTop=(total+16)+"px";
   });
@@ -2702,6 +2711,65 @@ document.addEventListener('touchstart', function unlockAudio(){
   }
   document.removeEventListener('touchstart',unlockAudio);
 },{once:true,passive:true});
+
+// ── HEADER TOGGLE ────────────────────────────────────────────────────────────
+let headerCollapsed = false;
+let _indicatorTimer = null;
+
+function setHeaderCollapsed(val){
+  if(headerCollapsed === val) return;
+  headerCollapsed = val;
+  const header = document.getElementById("header");
+  header.classList.toggle("collapsed", headerCollapsed);
+  applyHeaderOffset();
+  haptic("light");
+  // Show indicator pill briefly
+  const ind = document.getElementById("header-indicator");
+  if(ind){
+    ind.classList.add("show");
+    clearTimeout(_indicatorTimer);
+    _indicatorTimer = setTimeout(()=>ind.classList.remove("show"), 1200);
+  }
+}
+
+// ── Vertical swipe on document to show/hide header ──────────────────────────
+(function(){
+  let vsy=0, vsx=0, vdragging=false;
+  const THRESHOLD = 40; // px needed to trigger
+  const ZONE_W = 0.6;   // only centre 60% of screen width
+
+  document.addEventListener("touchstart", function(e){
+    const t=e.touches[0];
+    const cx=window.innerWidth/2;
+    const zw=window.innerWidth*ZONE_W/2;
+    // Only trigger in centre zone
+    if(t.clientX < cx-zw || t.clientX > cx+zw) return;
+    vsy=t.clientY; vsx=t.clientX; vdragging=true;
+  },{passive:true});
+
+  document.addEventListener("touchmove", function(e){
+    if(!vdragging) return;
+    const dy=e.touches[0].clientY - vsy;
+    const dx=e.touches[0].clientX - vsx;
+    // Cancel if mostly horizontal
+    if(Math.abs(dx) > Math.abs(dy)){vdragging=false; return;}
+  },{passive:true});
+
+  document.addEventListener("touchend", function(e){
+    if(!vdragging) return;
+    vdragging=false;
+    const dy=e.changedTouches[0].clientY - vsy;
+    const dx=e.changedTouches[0].clientX - vsx;
+    if(Math.abs(dx) > Math.abs(dy)*1.5) return; // too horizontal
+    if(dy > THRESHOLD && headerCollapsed){
+      // Swipe DOWN → show header
+      setHeaderCollapsed(false);
+    } else if(dy < -THRESHOLD && !headerCollapsed){
+      // Swipe UP → hide header
+      setHeaderCollapsed(true);
+    }
+  },{passive:true});
+})();
 
 applyHeaderOffset();
 // Re-run after navigateTo since sub-nav may show/hide
@@ -2867,20 +2935,29 @@ document.getElementById("view-reports").addEventListener("click",function(e){
       e.preventDefault();
       lastDx=dx;
       const pct=Math.min(Math.abs(dx)/window.innerWidth,1);
-      el.style.transform='translateX('+dx*0.35+'px)';
-      el.style.filter='blur('+(pct*2)+'px)';
+      // Apply drag to active view, not document
+      const activeEl=document.getElementById('view-'+currentView);
+      if(activeEl&&el===document.documentElement){
+        activeEl.style.transform='translateX('+dx*0.35+'px)';
+        activeEl.style.filter='blur('+(pct*2)+'px)';
+      } else {
+        el.style.transform='translateX('+dx*0.35+'px)';
+        el.style.filter='blur('+(pct*2)+'px)';
+      }
     },{passive:false});
 
     el.addEventListener('touchend',e=>{
       if(!dragging)return;
       dragging=false;
-      // Reset drag position with spring
-      el.style.transition=`transform 280ms ${EASE}, filter 280ms ease`;
-      el.style.transform='translateX(0)';
-      el.style.filter='blur(0px)';
-      el.addEventListener('transitionend',function h(){
-        el.removeEventListener('transitionend',h);
-        el.style.transition='';
+      // Reset drag on active view
+      const activeReset=document.getElementById('view-'+currentView);
+      const resetEl=(el===document.documentElement&&activeReset)?activeReset:el;
+      resetEl.style.transition=`transform 280ms ${EASE}, filter 280ms ease`;
+      resetEl.style.transform='translateX(0)';
+      resetEl.style.filter='blur(0px)';
+      resetEl.addEventListener('transitionend',function h(){
+        resetEl.removeEventListener('transitionend',h);
+        resetEl.style.transition='';
       },{once:true});
 
       const dx=lastDx;
@@ -2892,32 +2969,33 @@ document.getElementById("view-reports").addEventListener("click",function(e){
 
     el.addEventListener('touchcancel',()=>{
       dragging=false;
-      el.style.transition=`transform 200ms ${EASE}`;
-      el.style.transform='translateX(0)';
-      el.style.filter='';
-      el.addEventListener('transitionend',function h(){el.removeEventListener('transitionend',h);el.style.transition='';},{once:true});
+      const cancelEl=(el===document.documentElement)?document.getElementById('view-'+currentView)||el:el;
+      cancelEl.style.transition=`transform 200ms ${EASE}`;
+      cancelEl.style.transform='translateX(0)';
+      cancelEl.style.filter='';
+      cancelEl.addEventListener('transitionend',function h(){cancelEl.removeEventListener('transitionend',h);cancelEl.style.transition='';},{once:true});
     },{passive:true});
   }
 
-  // Sub-tabs
-  SUB.forEach(v=>addSwipe(document.getElementById('view-'+v),dir=>{
-    const i=SUB.indexOf(currentView);
-    if(dir==='left'&&i<SUB.length-1) return SUB[i+1];
-    if(dir==='right'&&i>0) return SUB[i-1];
-    const topI=TOP.indexOf('tasks');
-    if(dir==='left'&&i===SUB.length-1&&topI<TOP.length-1) return TOP[topI+1];
-    if(dir==='right'&&i===0&&topI>0) return TOP[topI-1];
+  // ── Single document-level swipe — works on entire screen including empty areas ──
+  function getSwipeTarget(dir){
+    const isSubView=SUB.indexOf(currentView)>=0;
+    if(isSubView){
+      const i=SUB.indexOf(currentView);
+      if(dir==='left'&&i<SUB.length-1) return SUB[i+1];
+      if(dir==='right'&&i>0) return SUB[i-1];
+      const topI=TOP.indexOf('tasks');
+      if(dir==='left'&&i===SUB.length-1&&topI<TOP.length-1) return TOP[topI+1];
+      if(dir==='right'&&i===0&&topI>0) return TOP[topI-1];
+    } else {
+      const cur=SUB.includes(currentView)?'tasks':currentView;
+      const i=TOP.indexOf(cur);
+      if(dir==='left'&&i<TOP.length-1) return TOP[i+1];
+      if(dir==='right'&&i>0) return TOP[i-1];
+    }
     return null;
-  }));
-
-  // Top-tabs
-  ['streak','macros','reports'].forEach(v=>addSwipe(document.getElementById('view-'+v),dir=>{
-    const cur=SUB.includes(currentView)?'tasks':currentView;
-    const i=TOP.indexOf(cur);
-    if(dir==='left'&&i<TOP.length-1) return TOP[i+1];
-    if(dir==='right'&&i>0) return TOP[i-1];
-    return null;
-  }));
+  }
+  addSwipe(document.documentElement, getSwipeTarget);
 
   // Task detail — slide in from right, swipe right to close
   (function(){
