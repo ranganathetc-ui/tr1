@@ -24,7 +24,7 @@
   .splash-btn{background:var(--text);border:none;color:#0d0d0d;padding:14px 44px;font-size:13px;font-weight:600;letter-spacing:1px;border-radius:50px;cursor:pointer;font-family:inherit;}
   .splash-sub{font-size:11px;color:var(--text3);margin-top:14px;letter-spacing:1px;}
   /* HEADER */
-  #header{padding:20px 20px 14px;border-bottom:1px solid var(--glass-border);position:sticky;top:0;background:rgba(13,13,13,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);z-index:9;}
+  #header{padding:20px 20px 14px;border-bottom:1px solid var(--glass-border);position:fixed;top:0;left:0;right:0;background:rgba(13,13,13,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);z-index:9;}
   #header-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;}
   .header-user{font-size:11px;color:var(--text3);letter-spacing:1px;text-align:right;}
   #jump-today-btn{display:none;background:none;border:1px solid var(--glass-border);color:var(--text2);padding:4px 12px;font-size:10px;letter-spacing:1px;border-radius:20px;cursor:pointer;font-family:inherit;}
@@ -34,16 +34,16 @@
   #progress-bar{height:100%;width:0%;border-radius:2px;transition:width 0.5s ease;}
   #progress-meta{display:flex;justify-content:space-between;margin-top:7px;font-size:10px;color:var(--text3);}
   /* NAV */
-  #nav{display:flex;border-bottom:1px solid var(--glass-border);overflow-x:auto;background:rgba(13,13,13,0.8);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);scrollbar-width:none;}
+  #nav{display:flex;border-bottom:1px solid var(--glass-border);overflow-x:auto;background:rgba(13,13,13,0.8);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);scrollbar-width:none;position:fixed;top:var(--header-h,110px);left:0;right:0;z-index:8;}
   #nav::-webkit-scrollbar{display:none;}
   .nav-btn{flex:1;min-width:48px;padding:13px 2px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);font-size:9px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;font-family:inherit;white-space:nowrap;}
   .nav-btn.active{border-bottom:2px solid var(--text);color:var(--text);}
-  #sub-nav{display:none;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);padding:0 12px;}
+  #sub-nav{display:none;border-bottom:1px solid var(--glass-border);background:rgba(13,13,13,0.8);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:0 12px;position:fixed;top:var(--subnav-top,152px);left:0;right:0;z-index:7;}
   #sub-nav.visible{display:flex;gap:4px;}
   .sub-btn{flex:1;padding:7px 4px;text-align:center;background:none;border:none;border-radius:20px;color:var(--text3);font-size:8px;letter-spacing:1.5px;cursor:pointer;text-transform:uppercase;font-family:inherit;margin:6px 0;transition:background 0.15s,color 0.15s;}
   .sub-btn.active{background:rgba(255,255,255,0.08);color:var(--text);border-radius:20px;}
   /* BODY */
-  .body{padding:16px;}
+  .body{padding:16px;padding-top:8px;}
   .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
   /* TASK ROWS */
   .task-row{display:flex;align-items:center;padding:14px 0;gap:14px;border-bottom:1px solid var(--glass-border);animation:fadeRow 0.2s ease;}
@@ -2357,16 +2357,7 @@ function setupListeners(){
     if(pb){ tasksSubPeriod=pb.dataset.p; tasksOffset=0; renderReports(); return; }
     if(e.target.id==="tasks-prev"){ if(tasksSubPeriod!=="all")tasksOffset--; renderReports(); return; }
     if(e.target.id==="tasks-next"){ const {canNext}=getTasksWindowKeys(); if(canNext)tasksOffset++; renderReports(); return; }
-    if(e.target.id==="haptic-toggle"){
-      hapticEnabled=!hapticEnabled;persist();
-      const btn=document.getElementById("haptic-toggle");
-      if(btn){
-        btn.style.background=hapticEnabled?"#4ade80":"#2a2a2a";
-        const knob=btn.querySelector("span");
-        if(knob) knob.style.left=hapticEnabled?"21px":"3px";
-      }
-      haptic("medium"); return;
-    }
+    // haptic-toggle handled via direct listener below
     if(e.target.id==="settings-name-save"){
       var n=document.getElementById("settings-name-inp").value.trim();
       if(n){userName=n;persist();document.getElementById("header-username").textContent=n;showImportStatus("Name updated!","#4ade80");}return;
@@ -2680,7 +2671,44 @@ document.getElementById("view-macros").addEventListener("click",function(e){
       hideSplash();
     }
   }
-  document.getElementById("splash-btn").addEventListener("click",function(){
+  // ── DYNAMIC HEADER OFFSET ────────────────────────────────────────────────────
+function applyHeaderOffset(){
+  const header=document.getElementById("header");
+  const nav=document.getElementById("nav");
+  const subnav=document.getElementById("sub-nav");
+  if(!header||!nav) return;
+  const hh=header.offsetHeight;
+  const nh=nav.offsetHeight;
+  const sh=subnav.classList.contains("visible")?subnav.offsetHeight:0;
+  const total=hh+nh+sh;
+  // Update fixed positions
+  nav.style.top=hh+"px";
+  if(subnav) subnav.style.top=(hh+nh)+"px";
+  // Push all body views down
+  document.querySelectorAll(".body").forEach(el=>{
+    el.style.paddingTop=(total+16)+"px";
+  });
+}
+// Run on load and on any nav change
+// Unlock AudioContext on first touch anywhere — critical for iOS PWA haptics
+document.addEventListener('touchstart', function unlockAudio(){
+  if(_isIOS && !_hapticAudio){
+    try{
+      _hapticAudio=new(window.AudioContext||window.webkitAudioContext)();
+      const buf=_hapticAudio.createBuffer(1,1,22050);
+      const src=_hapticAudio.createBufferSource();
+      src.buffer=buf;src.connect(_hapticAudio.destination);src.start(0);
+    }catch(e){}
+  }
+  document.removeEventListener('touchstart',unlockAudio);
+},{once:true,passive:true});
+
+applyHeaderOffset();
+// Re-run after navigateTo since sub-nav may show/hide
+const _origNav=window.navigateTo;
+window.navigateTo=function(v,o){_origNav(v,o);setTimeout(applyHeaderOffset,50);};
+
+document.getElementById("splash-btn").addEventListener("click",function(){
   // Unlock AudioContext on very first tap (iOS requirement)
   if(_isIOS && !_hapticAudio){
     try{
@@ -2695,6 +2723,24 @@ document.getElementById("view-macros").addEventListener("click",function(e){
 })();
 
 document.getElementById("jump-today-btn").addEventListener("click",function(){haptic("light");viewingKey=null;editMode=false;editId=null;navigateTo("today");});
+// ── HAPTIC TOGGLE — direct listener, no re-render, instant ──────────────────
+document.addEventListener("click", function(e){
+  if(e.target.id!=="haptic-toggle" && !e.target.closest("#haptic-toggle")) return;
+  // Update state immediately
+  hapticEnabled=!hapticEnabled;
+  // Update UI instantly — direct DOM, no re-render
+  const btn=document.getElementById("haptic-toggle");
+  if(btn){
+    btn.style.background=hapticEnabled?"#4ade80":"#2a2a2a";
+    const knob=btn.querySelector("span");
+    if(knob) knob.style.left=hapticEnabled?"21px":"3px";
+  }
+  // Persist async so it doesn't block the UI
+  setTimeout(()=>sv("rm_haptic",hapticEnabled),0);
+  // Fire haptic after state update
+  if(hapticEnabled) haptic("medium");
+},{capture:true});
+
 document.getElementById("cp-close-btn").addEventListener("click",function(){haptic("light");hideCompletionPopup();});
 document.getElementById("cp-dismiss").addEventListener("click",function(){haptic("medium");hideCompletionPopup();});
 // Tap backdrop to close
@@ -2813,15 +2859,17 @@ document.getElementById("view-reports").addEventListener("click",function(e){
       const dx=e.touches[0].clientX-sx;
       const dy=e.touches[0].clientY-sy;
       if(!moved){
-        if(Math.abs(dy)>Math.abs(dx)){dragging=false;return;}
+        // Determine direction on first move
+        if(Math.abs(dy)>Math.abs(dx)){dragging=false;return;} // vertical — bail out
         moved=true;
       }
+      // Horizontal swipe confirmed — block page scroll
+      e.preventDefault();
       lastDx=dx;
-      // Live drag — shift element
       const pct=Math.min(Math.abs(dx)/window.innerWidth,1);
       el.style.transform='translateX('+dx*0.35+'px)';
       el.style.filter='blur('+(pct*2)+'px)';
-    },{passive:true});
+    },{passive:false});
 
     el.addEventListener('touchend',e=>{
       if(!dragging)return;
